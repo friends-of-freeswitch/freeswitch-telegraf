@@ -1,0 +1,1 @@
+-e git+https://github.com/EvoluxBR/greenswitch.git#egg=greenswitch
