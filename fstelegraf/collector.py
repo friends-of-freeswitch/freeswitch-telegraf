@@ -70,7 +70,7 @@ class FreeSWITCHMetricsCollector(object):
             fields.update({
                 'total': int(total_match.group(1)),
             })
-        count_match = re.search(r'\n(\d+).+-.+peak.+(\d+).+5min.+(\d+)',
+        count_match = re.search(r'\n(\d+).+-\s+peak\s+(\d+).+5min\s+(\d+)',
                                 status, re.IGNORECASE)
         if count_match:
             fields.update({
@@ -78,7 +78,7 @@ class FreeSWITCHMetricsCollector(object):
                 'concurrent_peak': int(count_match.group(2)),
                 'concurrent_5min': int(count_match.group(3))
             })
-        cps_match = re.search(r'\n(\d+).+per.+Sec.+peak.+(\d+).+5min.+(\d+)',
+        cps_match = re.search(r'\n(\d+).+per\s+Sec.+peak\s+(\d+).+5min\s+(\d+)',
                               status, re.IGNORECASE)
         if cps_match:
             fields.update({
