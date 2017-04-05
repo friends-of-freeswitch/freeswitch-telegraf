@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# vim: tabstop=4 softtabstop=4 shiftwidth=4 textwidth=80 smarttab expandtab
 """
 FreeSWITCH Input for Telegraf
 
@@ -11,6 +12,24 @@ import argparse
 import greenswitch
 import xml.etree.ElementTree as ET
 from itertools import chain
+from recordclass import recordclass
+
+ConfMemberMetrics = recordclass('ConfMemberMetrics', (
+    'id',
+    'uuid',
+    'input_buflen',
+    'output_buflen',
+    'input_frames_count',
+    'input_flush_count',
+    'input_hiccups_count',
+    'input_max_time',
+    'input_avg_time',
+    'output_frames_count',
+    'output_flush_count',
+    'output_hiccups_count',
+    'output_max_time',
+    'output_avg_time'
+))
 
 
 class Metric(object):
@@ -32,6 +51,14 @@ class Metric(object):
             ','.join(tags),
             ','.join(fields)
         )
+
+
+def is_number(s):
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
 
 
 class FreeSWITCHMetricsCollector(object):
@@ -93,6 +120,8 @@ class FreeSWITCHMetricsCollector(object):
         """ Colect sofia profile metrics """
         # First, gather all profile names
         status = self._api('sofia xmlstatus')
+        if not status:
+            return
         try:
             root = ET.fromstring(status)
             profiles = {e.text for e in
@@ -122,10 +151,55 @@ class FreeSWITCHMetricsCollector(object):
                        {'profile': profile})
             )
 
+    def _collect_conference_metrics(self):
+        """ Collect FreeSWITCH Conference Metrics """
+        output = self._api('conference list')
+        if not output:
+            return
+        confs = []
+        for line in output.split('\n'):
+            confmatch = re.search(r'Conference\s+(\w+).+', line, re.IGNORECASE)
+            if not confmatch:
+                continue
+            confs.append(confmatch.group(1))
+        if not confs:
+            return
+        for conf in confs:
+            output = self._api('conference {} debug_all'.format(conf))
+            if not output or 'not found' in output:
+                continue
+
+            # Right now we only care about input/output buffer sizes,
+            # max wait and time hiccup counters
+            max_metrics = ConfMemberMetrics(*((0, ) * 14))
+            exclude = ('id', 'uuid')
+            cfields = [f for f in ConfMemberMetrics._fields if f not in exclude]
+            for line in output.split('\n'):
+                if not line:
+                    continue
+                metrics = ConfMemberMetrics(*line.split(';'))
+                for field in cfields:
+                    v = getattr(metrics, field)
+                    if not is_number(v):
+                        continue
+                    v = int(v)
+                    m = int(getattr(max_metrics, field))
+                    if v > m:
+                        setattr(max_metrics, field, v)
+
+            fields = {}
+            for field in cfields:
+                fields['max_' + field] = getattr(max_metrics, field)
+            self.metrics.append(
+                Metric('freeswitch_conference_metrics', fields,
+                       {'confname': conf})
+            )
+
     def collect(self):
         """ Collect FreeSWITCH Metrics """
         self._collect_core_status_metrics()
         self._collect_sofia_status_metrics()
+        self._collect_conference_metrics()
 
     def _api(self, api):
         """ Execute FreeSWITCH API """
