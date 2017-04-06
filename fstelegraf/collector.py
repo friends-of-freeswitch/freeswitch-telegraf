@@ -32,6 +32,22 @@ ConfMemberMetrics = recordclass('ConfMemberMetrics', (
 ))
 
 
+ModuleInfo = recordclass('ModuleInfo', (
+    'type',
+    'name',
+    'ikey',
+    'filename'
+))
+
+
+TimerSample = recordclass('TimerSample', (
+    'timer',
+    'iter',
+    'target',
+    'value'
+))
+
+
 class Metric(object):
     def __init__(self, measurement, fields, tags={}):
         self.measurement = measurement
@@ -67,6 +83,7 @@ class FreeSWITCHMetricsCollector(object):
 
     def __init__(self):
         self.metrics = []
+        self._modules = []
         parser = argparse.ArgumentParser(
             description='Collect FreeSWITCH Metrics'
         )
@@ -195,9 +212,78 @@ class FreeSWITCHMetricsCollector(object):
                        {'confname': conf})
             )
 
+    def _get_modules(self):
+        if self._modules:
+            return self._modules
+        self._modules = []
+        output = self._api('show modules')
+        if not output:
+            return self._modules
+        for line in output.split('\n'):
+            if ',' not in line or line.startswith('type'):
+                continue
+            self._modules.append(ModuleInfo(*line.split(',')))
+        return self._modules
+
+    def _collect_core_timing_metrics(self):
+        """ Collect FreeSWITCH Core Timing Metrics """
+        time_modules = [m for m in self._get_modules() if m.type == 'timer']
+        if not time_modules:
+            return
+        # Unfortunately timer_test currently provides limited output
+        # this collector is assuming a patched FS version (FIXME: Submit patch)
+        interval = 20
+        samples = 50
+        threshold_50 = (interval * 1.5) * 1000
+        threshold_100 = (interval * 2) * 1000
+        for mod in time_modules:
+            output = self._api('timer_test {} {} {}'.format(interval, samples, mod.name))
+            if not output:
+                continue
+            min_time = float('inf')
+            max_time = 0
+            avg_time = 0
+            higher_count_50 = 0
+            higher_count_100 = 0
+            for line in output.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                if 'Avg:' in line:
+                    # Last line, just get the average and exit loop
+                    m = re.search(r'.*Avg:\s+([\d\.]+)ms.*', line, re.IGNORECASE)
+                    if not m:
+                        return
+                    avg_time = float(m.group(1)) * 1000 # get it in microseconds
+                    break
+                sample = TimerSample(*line.split(';'))
+                value = float(sample.value)
+                max_time = max(value, max_time)
+                min_time = min(value, min_time)
+                if value >= threshold_100:
+                    higher_count_100 += 1
+                elif value >= threshold_50:
+                    higher_count_50 += 1
+
+            if min_time == float('inf'):
+                min_time = 0
+
+            fields = {
+                'min_time': int(min_time),
+                'max_time': int(max_time),
+                'avg_time': int(avg_time),
+                'percent_higher_50_count': int(higher_count_50),
+                'percent_higher_100_count': int(higher_count_100)
+            }
+            self.metrics.append(
+                Metric('freeswitch_core_timing', fields,
+                       {'timer': mod.name})
+            )
+
     def collect(self):
         """ Collect FreeSWITCH Metrics """
         self._collect_core_status_metrics()
+        self._collect_core_timing_metrics()
         self._collect_sofia_status_metrics()
         self._collect_conference_metrics()
 
