@@ -28,7 +28,11 @@ ConfMemberMetrics = recordclass('ConfMemberMetrics', (
     'output_flush_count',
     'output_hiccups_count',
     'output_max_time',
-    'output_avg_time'
+    'output_avg_time',
+    'core_write_frames_count',
+    'core_write_hiccups_count',
+    'core_write_max_time',
+    'core_write_avg_time',
 ))
 
 
