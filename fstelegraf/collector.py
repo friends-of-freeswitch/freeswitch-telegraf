@@ -168,6 +168,33 @@ class FreeSWITCHMetricsCollector(object):
                        {'profile': profile})
             )
 
+    def _parse_conf_loop_metrics(self, output, fields):
+        if not output:
+            return
+        field_map = {
+            'Time Hiccups': 'hiccups',
+            'Max Wait': 'max_time',
+            'Min Wait': 'min_time',
+            'Avg Wait': 'avg_time'
+        }
+        field_prefix = ''
+        for line in output.split('\n'):
+            if '-- Timer' in line:
+                field_prefix = 'timer_'
+            elif '-- Mixing' in line:
+                field_prefix = 'mixloop_'
+            if not field_prefix:
+                continue
+            if ':' not in line:
+                continue
+            k, v = [v.strip() for v in line.split(':')]
+            if k not in field_map:
+                continue
+            m = re.search(r'^(\d+).*', line.split(':')[1].strip())
+            if not m:
+                continue
+            fields[field_prefix + field_map[k]] = int(m.group(1))
+
     def _collect_conference_metrics(self):
         """ Collect FreeSWITCH Conference Metrics """
         output = self._api('conference list')
@@ -188,14 +215,14 @@ class FreeSWITCHMetricsCollector(object):
 
             # Right now we only care about input/output buffer sizes,
             # max wait and time hiccup counters
-            max_metrics = ConfMemberMetrics(*((0, ) * 14))
+            max_metrics = ConfMemberMetrics(*((0, ) * len(ConfMemberMetrics._fields)))
             exclude = ('id', 'uuid')
-            cfields = [f for f in ConfMemberMetrics._fields if f not in exclude]
+            cmfields = [f for f in ConfMemberMetrics._fields if f not in exclude]
             for line in output.split('\n'):
                 if not line:
                     continue
                 metrics = ConfMemberMetrics(*line.split(';'))
-                for field in cfields:
+                for field in cmfields:
                     v = getattr(metrics, field)
                     if not is_number(v):
                         continue
@@ -203,10 +230,14 @@ class FreeSWITCHMetricsCollector(object):
                     m = int(getattr(max_metrics, field))
                     if v > m:
                         setattr(max_metrics, field, v)
-
             fields = {}
-            for field in cfields:
+            for field in cmfields:
                 fields['max_' + field] = getattr(max_metrics, field)
+
+            # Now add conference mixing thread metrics
+            output = self._api('conference {} debug'.format(conf))
+            self._parse_conf_loop_metrics(output, fields)
+
             self.metrics.append(
                 Metric('freeswitch_conference_metrics', fields,
                        {'confname': conf})
