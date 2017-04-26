@@ -206,7 +206,7 @@ class FreeSWITCHMetricsCollector(object):
             return
         confs = []
         for line in output.split('\n'):
-            confmatch = re.search(r'Conference\s+(\w+).+', line, re.IGNORECASE)
+            confmatch = re.search(r'Conference\s+([A-Z0-9.-_]+).+', line, re.IGNORECASE)
             if not confmatch:
                 continue
             confs.append(confmatch.group(1))
