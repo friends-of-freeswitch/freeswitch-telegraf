@@ -24,9 +24,9 @@ class Metric(object):
 
     def __str__(self):
         tags = [''] + ['{}={}'.format(k, v)
-                       for k, v in self.tags.iteritems()]
+                       for k, v in iter(self.tags.items())]
         fields = ['{}={}'.format(k, v)
-                  for k, v in self.fields.iteritems()]
+                  for k, v in iter(self.fields.items())]
         return '{}{} {}'.format(
             self.measurement,
             ','.join(tags),
